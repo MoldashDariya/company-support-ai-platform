@@ -1,0 +1,1 @@
+# Keeps data/ in git; runtime artifacts (chroma/, memory.db) are gitignored.
