@@ -49,6 +49,11 @@ ANSWER_MIN_WORDS = int(os.getenv("ANSWER_MIN_WORDS", "40"))
 ANSWER_MAX_WORDS = int(os.getenv("ANSWER_MAX_WORDS", "180"))
 RETRIEVAL_MIN_SCORE = float(os.getenv("RETRIEVAL_MIN_SCORE", "0.0"))
 RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "hybrid")  # hybrid | semantic | sparse
+ENABLE_SEMANTIC_SEARCH = os.getenv("ENABLE_SEMANTIC_SEARCH", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 ENABLE_BM25 = os.getenv("ENABLE_BM25", "true").lower() in ("1", "true", "yes")
 HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))
 SEMANTIC_MIN_SCORE = float(os.getenv("SEMANTIC_MIN_SCORE", "0.20"))
@@ -122,6 +127,28 @@ WELCOME_MESSAGE = os.getenv(
     "услуги, бренды, салоны, доставка, программа для дизайнеров.\n\n"
     "Просто напишите вопрос обычным сообщением.",
 )
+
+def effective_retrieval_mode() -> str:
+    """Runtime retrieval mode; semantic/hybrid collapse to sparse when embeddings are off."""
+    if not ENABLE_SEMANTIC_SEARCH:
+        return "sparse"
+    return RETRIEVAL_MODE
+
+
+def sparse_retrieval_enabled() -> bool:
+    """BM25 is always on when semantic search is disabled."""
+    if not ENABLE_SEMANTIC_SEARCH:
+        return True
+    mode = effective_retrieval_mode()
+    return ENABLE_BM25 and mode in ("sparse", "hybrid")
+
+
+def semantic_retrieval_enabled() -> bool:
+    """Whether to load SentenceTransformer, ChromaDB, and dense retrieval."""
+    if not ENABLE_SEMANTIC_SEARCH:
+        return False
+    return effective_retrieval_mode() in ("semantic", "hybrid")
+
 
 INJECTION_PATTERNS = (
     "ignore previous",

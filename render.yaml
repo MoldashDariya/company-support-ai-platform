@@ -19,16 +19,13 @@ services:
         value: https://api.openai.com/v1
       - key: LLM_MODEL
         value: gpt-4o-mini
+      - key: ENABLE_SEMANTIC_SEARCH
+        value: "false"
       - key: RETRIEVAL_MODE
-        value: hybrid
+        value: sparse
       - key: ENABLE_BM25
         value: "true"
-      - key: EMBEDDING_MODEL
-        value: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
       - key: CITATION_INCLUDE_URLS
         value: "true"
       - key: CORPUS_LANGUAGE
         value: ru
-      # First deploy builds Chroma from data/company_knowledge.md (may take a few minutes)
-      - key: HF_HOME
-        value: /tmp/huggingface

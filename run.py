@@ -7,19 +7,28 @@ import importlib
 import logging
 import sys
 
-_REQUIRED_PACKAGES = (
+_BASE_PACKAGES = (
     ("aiogram", "aiogram"),
     ("openai", "openai"),
     ("dotenv", "python-dotenv"),
     ("rank_bm25", "rank-bm25"),
+)
+
+_SEMANTIC_PACKAGES = (
     ("chromadb", "chromadb"),
     ("sentence_transformers", "sentence-transformers"),
 )
 
 
 def _check_dependencies() -> None:
+    from runtime import settings
+
+    required = list(_BASE_PACKAGES)
+    if settings.ENABLE_SEMANTIC_SEARCH:
+        required.extend(_SEMANTIC_PACKAGES)
+
     missing: list[str] = []
-    for module, package in _REQUIRED_PACKAGES:
+    for module, package in required:
         try:
             importlib.import_module(module)
         except ImportError:
@@ -64,9 +73,10 @@ async def main() -> None:
     validate_environment()
 
     logger.info(
-        "Environment loaded | retrieval=%s bm25=%s citations_urls=%s",
-        settings.RETRIEVAL_MODE,
-        settings.ENABLE_BM25,
+        "Environment loaded | retrieval=%s semantic=%s bm25=%s citations_urls=%s",
+        settings.effective_retrieval_mode(),
+        settings.ENABLE_SEMANTIC_SEARCH,
+        settings.sparse_retrieval_enabled(),
         settings.CITATION_INCLUDE_URLS,
     )
 

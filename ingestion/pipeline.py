@@ -5,17 +5,18 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from domain.models import KnowledgeFragment
 from ingestion.chunker import ChunkingStats, SemanticChunker
 from ingestion.crawler import CrawlReport, WebsiteCrawler
 from ingestion.html_cleaner import CleanedPage, HtmlCleaner
-from knowledge.embeddings import SentenceEmbeddingService
 from knowledge.loader import corpus_fingerprint, export_fragments_to_markdown
 from knowledge.retriever import SparseRetriever
-from knowledge.semantic_retriever import SemanticRetriever
-from knowledge.vector_store import ChromaVectorStore
 from runtime import settings
+
+if TYPE_CHECKING:
+    from knowledge.semantic_retriever import SemanticRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +110,16 @@ def _top_sections(fragments: list[KnowledgeFragment], limit: int = 15) -> list[s
     return [f"{name} ({count})" for name, count in counts.most_common(limit)]
 
 
-def rebuild_semantic_index(fragments: list[KnowledgeFragment]) -> SemanticRetriever:
-    """Embed fragments and rebuild the ChromaDB collection."""
+def rebuild_semantic_index(fragments: list[KnowledgeFragment]) -> Any | None:
+    """Embed fragments and rebuild the ChromaDB collection (optional)."""
+    if not settings.semantic_retrieval_enabled():
+        logger.info("Semantic index skipped (ENABLE_SEMANTIC_SEARCH=false)")
+        return None
+
+    from knowledge.embeddings import SentenceEmbeddingService
+    from knowledge.semantic_retriever import SemanticRetriever
+    from knowledge.vector_store import ChromaVectorStore
+
     embeddings = SentenceEmbeddingService(settings.EMBEDDING_MODEL)
     store = ChromaVectorStore(
         persist_dir=str(settings.CHROMA_PERSIST_DIR),
@@ -123,7 +132,7 @@ def rebuild_semantic_index(fragments: list[KnowledgeFragment]) -> SemanticRetrie
 
 def rebuild_sparse_index(fragments: list[KnowledgeFragment]) -> SparseRetriever | None:
     """Rebuild BM25 index in memory (used on next HybridRetriever bootstrap)."""
-    if not settings.ENABLE_BM25:
+    if not settings.sparse_retrieval_enabled():
         return None
     sparse = SparseRetriever()
     sparse.index(fragments)

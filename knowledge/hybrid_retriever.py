@@ -1,17 +1,20 @@
-"""Hybrid retrieval: reciprocal rank fusion of sparse (BM25) and semantic search."""
+"""Hybrid retrieval: reciprocal rank fusion of sparse (BM25) and optional semantic search."""
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from cognition.intent import QueryIntent, classify_query_intent
 from domain.models import KnowledgeFragment
 from knowledge.loader import load_markdown_corpus
 from knowledge.reranker import merge_candidate_pool, rerank_fragments
 from knowledge.retriever import SparseRetriever
-from knowledge.semantic_retriever import SemanticRetriever
 from runtime import settings
+
+if TYPE_CHECKING:
+    from knowledge.semantic_retriever import SemanticRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -61,44 +64,34 @@ class HybridRetriever:
         *,
         corpus_path: Path | None = None,
     ) -> HybridRetriever:
-        """Wire semantic + sparse indexes from an in-memory fragment list."""
+        """Wire sparse and optional semantic indexes from an in-memory fragment list."""
         path = corpus_path or settings.CORPUS_PATH
 
-        semantic: SemanticRetriever | None = None
-        if settings.RETRIEVAL_MODE in ("semantic", "hybrid"):
-            from knowledge.embeddings import SentenceEmbeddingService
-            from knowledge.vector_store import ChromaVectorStore
-
-            embeddings = SentenceEmbeddingService(settings.EMBEDDING_MODEL)
-            store = ChromaVectorStore(
-                persist_dir=str(settings.CHROMA_PERSIST_DIR),
-                collection_name=settings.CHROMA_COLLECTION,
-            )
-            semantic = SemanticRetriever(embeddings, store)
-            if path.exists() and path.stat().st_size > 0:
-                semantic.load_from_path(path)
-            elif fragments:
-                semantic.index(fragments)
-            else:
-                logger.warning("No corpus file and no fragments; semantic index empty")
+        semantic = _build_semantic_retriever(path, fragments)
 
         sparse: SparseRetriever | None = None
-        if settings.ENABLE_BM25 and settings.RETRIEVAL_MODE in ("sparse", "hybrid"):
+        if settings.sparse_retrieval_enabled():
             sparse = SparseRetriever()
             if fragments:
                 sparse.index(fragments)
 
+        if not semantic and not sparse:
+            logger.warning(
+                "No retrieval backend enabled; check ENABLE_SEMANTIC_SEARCH and ENABLE_BM25"
+            )
+
         retriever = cls(
             semantic=semantic,
             sparse=sparse,
-            enable_sparse=settings.ENABLE_BM25,
+            enable_sparse=settings.sparse_retrieval_enabled(),
             rrf_k=settings.HYBRID_RRF_K,
         )
         retriever._fragments = fragments
         logger.info(
-            "Hybrid retriever ready | mode=%s bm25=%s chunks=%d",
-            settings.RETRIEVAL_MODE,
-            settings.ENABLE_BM25,
+            "Retriever ready | mode=%s semantic=%s bm25=%s chunks=%d",
+            settings.effective_retrieval_mode(),
+            semantic is not None,
+            sparse is not None,
             retriever.fragment_count,
         )
         return retriever
@@ -113,7 +106,7 @@ class HybridRetriever:
         intent: QueryIntent | None = None,
     ) -> list[KnowledgeFragment]:
         lang = language or settings.CORPUS_LANGUAGE
-        mode = settings.RETRIEVAL_MODE
+        mode = settings.effective_retrieval_mode()
         effective_limit = min(limit, settings.RETRIEVAL_TOP_K)
         query_intent = intent or classify_query_intent(query)
 
@@ -136,7 +129,7 @@ class HybridRetriever:
             ranked = rerank_fragments(query, hits, limit=effective_limit, intent=query_intent)
             return self._propagate_citation_refs(ranked)
 
-        if self._semantic:
+        if self._semantic and self._enable_sparse and self._sparse:
             return await self._hybrid_retrieve(
                 query, effective_limit, min_score, language=lang, intent=query_intent
             )
@@ -172,14 +165,15 @@ class HybridRetriever:
         pool_size = settings.RETRIEVAL_CANDIDATE_POOL
         rankings: list[list[KnowledgeFragment]] = []
 
-        semantic_hits = await self._semantic.retrieve(
-            query,
-            limit=pool_size,
-            min_score=settings.SEMANTIC_MIN_SCORE,
-            language=language,
-        )
-        if semantic_hits:
-            rankings.append(semantic_hits)
+        if self._semantic:
+            semantic_hits = await self._semantic.retrieve(
+                query,
+                limit=pool_size,
+                min_score=settings.SEMANTIC_MIN_SCORE,
+                language=language,
+            )
+            if semantic_hits:
+                rankings.append(semantic_hits)
 
         if self._enable_sparse and self._sparse:
             sparse_hits = await self._sparse.retrieve(
@@ -211,6 +205,32 @@ class HybridRetriever:
             ranked = rerank_fragments(query, all_known, limit=limit, intent=intent)
 
         return self._propagate_citation_refs(ranked)
+
+
+def _build_semantic_retriever(
+    corpus_path: Path,
+    fragments: list[KnowledgeFragment],
+) -> Any | None:
+    if not settings.semantic_retrieval_enabled():
+        return None
+
+    from knowledge.embeddings import SentenceEmbeddingService
+    from knowledge.semantic_retriever import SemanticRetriever
+    from knowledge.vector_store import ChromaVectorStore
+
+    embeddings = SentenceEmbeddingService(settings.EMBEDDING_MODEL)
+    store = ChromaVectorStore(
+        persist_dir=str(settings.CHROMA_PERSIST_DIR),
+        collection_name=settings.CHROMA_COLLECTION,
+    )
+    semantic = SemanticRetriever(embeddings, store)
+    if corpus_path.exists() and corpus_path.stat().st_size > 0:
+        semantic.load_from_path(corpus_path)
+    elif fragments:
+        semantic.index(fragments)
+    else:
+        logger.warning("No corpus file and no fragments; semantic index empty")
+    return semantic
 
 
 def _fragment_key(fragment: KnowledgeFragment) -> str:
