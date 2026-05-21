@@ -11,6 +11,7 @@ from domain.models import KnowledgeFragment
 from ingestion.chunker import ChunkingStats, SemanticChunker
 from ingestion.crawler import CrawlReport, WebsiteCrawler
 from ingestion.html_cleaner import CleanedPage, HtmlCleaner
+from ingestion.quality import filter_pages_by_url
 from knowledge.loader import corpus_fingerprint, export_fragments_to_markdown
 from knowledge.retriever import SparseRetriever
 from runtime import settings
@@ -27,6 +28,7 @@ class IngestionResult:
     pages_cleaned: int = 0
     chunks_indexed: int = 0
     chunks_deduplicated: int = 0
+    chunks_quality_skipped: int = 0
     crawl_failures: int = 0
     corpus_path: str = ""
     chroma_collection: str = ""
@@ -63,7 +65,7 @@ class KnowledgeIngestionPipeline:
         result.crawl_failures = len(crawl_report.failed_urls)
         result.errors.extend(f"{url}: {err}" for url, err in crawl_report.failed_urls)
 
-        cleaned = self._clean_pages(crawl_report)
+        cleaned = filter_pages_by_url(self._clean_pages(crawl_report))
         result.pages_cleaned = len(cleaned)
 
         if not cleaned:
@@ -74,6 +76,7 @@ class KnowledgeIngestionPipeline:
         fragments, chunk_stats = self._chunker.chunk_pages(cleaned)
         result.chunks_indexed = chunk_stats.final_chunks
         result.chunks_deduplicated = chunk_stats.deduplicated
+        result.chunks_quality_skipped = chunk_stats.quality_skipped
         result.top_sections = _top_sections(fragments)
 
         if not fragments:
@@ -87,9 +90,10 @@ class KnowledgeIngestionPipeline:
 
         result.corpus_hash = corpus_fingerprint(fragments)
         logger.info(
-            "Ingestion complete | pages=%d chunks=%d hash=%s",
+            "Ingestion complete | pages=%d chunks=%d skipped_urls=%d hash=%s",
             result.pages_cleaned,
             result.chunks_indexed,
+            len(crawl_report.skipped_urls),
             result.corpus_hash[:12],
         )
         return result

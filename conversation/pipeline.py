@@ -9,11 +9,13 @@ from cognition.intent import QueryIntent, classify_query_intent
 from domain.models import (
     AssistantResponse,
     ChatTurn,
+    KnowledgeFragment,
     MessageRole,
     PipelineResult,
     UserInquiry,
 )
 from knowledge.context import build_grounded_context, log_retrieval_context_stats
+from knowledge.faq import match_faq
 from domain.ports import KnowledgeRetriever, SessionMemory
 from runtime import settings
 
@@ -39,6 +41,23 @@ class SupportConversationPipeline:
         self._memory = memory
         self._guard = guard
         self._throttle = throttle
+
+    async def _resolve_fragments(
+        self,
+        query: str,
+        intent: QueryIntent,
+    ) -> list[KnowledgeFragment]:
+        """FAQ first; BM25 retrieval when no confident FAQ match."""
+        faq_hit = match_faq(query, intent)
+        if faq_hit:
+            _category, fragments = faq_hit
+            return fragments
+        return await self._retriever.retrieve(
+            query,
+            limit=settings.RETRIEVAL_TOP_K,
+            min_score=settings.RETRIEVAL_MIN_SCORE,
+            intent=intent,
+        )
 
     async def handle(self, inquiry: UserInquiry) -> PipelineResult:
         session_id = inquiry.session_id
@@ -71,12 +90,7 @@ class SupportConversationPipeline:
         intent = classify_query_intent(inquiry.text)
         last_opening = self._memory.get_last_assistant_opening(session_id)
 
-        fragments = await self._retriever.retrieve(
-            inquiry.text,
-            limit=settings.RETRIEVAL_TOP_K,
-            min_score=settings.RETRIEVAL_MIN_SCORE,
-            intent=intent,
-        )
+        fragments = await self._resolve_fragments(inquiry.text, intent)
         context = build_grounded_context(
             fragments,
             intent=intent,
@@ -155,12 +169,7 @@ class SupportConversationPipeline:
         intent = classify_query_intent(inquiry.text)
         last_opening = self._memory.get_last_assistant_opening(session_id)
 
-        fragments = await self._retriever.retrieve(
-            inquiry.text,
-            limit=settings.RETRIEVAL_TOP_K,
-            min_score=settings.RETRIEVAL_MIN_SCORE,
-            intent=intent,
-        )
+        fragments = await self._resolve_fragments(inquiry.text, intent)
         context = build_grounded_context(
             fragments,
             intent=intent,

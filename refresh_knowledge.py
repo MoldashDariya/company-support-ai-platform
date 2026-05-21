@@ -48,6 +48,7 @@ def main() -> int:
     print(f"Pages cleaned:      {result.pages_cleaned}")
     print(f"Chunks indexed:     {result.chunks_indexed}")
     print(f"Duplicates removed: {result.chunks_deduplicated}")
+    print(f"Low-quality skipped: {result.chunks_quality_skipped}")
     print(f"Crawl failures:     {result.crawl_failures}")
     print(f"Corpus file:        {result.corpus_path}")
     print(f"Chroma collection:  {result.chroma_collection}")

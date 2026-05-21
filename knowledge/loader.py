@@ -94,6 +94,10 @@ def load_markdown_corpus(
             )
         )
 
+    from ingestion.quality import filter_fragments
+
+    fragments, _skipped = filter_fragments(fragments, log_skips=True)
+
     if not fragments and document_title:
         metadata = ChunkMetadata(
             title=document_title,

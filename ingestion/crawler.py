@@ -11,16 +11,12 @@ from urllib.parse import parse_qs, urldefrag, urljoin, urlparse
 
 import httpx
 
+from ingestion.url_filters import is_url_allowed, url_block_reason
 from runtime import settings
 
 logger = logging.getLogger(__name__)
 
-_SKIP_PATH_PATTERNS = re.compile(
-    r"(/catalog|/cart|/login|/logout|/checkout|/register|/signup|/auth|/account|"
-    r"/wishlist|/compare|/favourites|/barcode-scanner|"
-    r"\?action=|add-to-cart|wp-admin|/product/|/variant)",
-    re.IGNORECASE,
-)
+_SKIP_PATH_PATTERNS = re.compile(r"/catalog", re.IGNORECASE)
 
 _HYDRATION_MARKERS = re.compile(
     r"(__NEXT_DATA__|window\.__INITIAL_STATE__|application/ld\+json|"
@@ -121,7 +117,9 @@ class WebsiteCrawler:
                 visited.add(url)
 
                 if not _is_crawlable(url):
+                    reason = url_block_reason(url) or "not_crawlable"
                     report.skipped_urls.append(url)
+                    logger.info("Skipped URL | url=%s reason=%s", url, reason)
                     continue
 
                 try:
@@ -195,6 +193,8 @@ class WebsiteCrawler:
 def _is_crawlable(url: str) -> bool:
     parsed = urlparse(url)
     if not parsed.netloc:
+        return False
+    if not is_url_allowed(url):
         return False
     full = url.lower()
     if _SKIP_PATH_PATTERNS.search(full):

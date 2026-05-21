@@ -6,9 +6,14 @@ import hashlib
 import re
 from dataclasses import dataclass
 
+import logging
+
 from domain.models import ChunkMetadata, KnowledgeFragment
 from ingestion.html_cleaner import CleanedPage, normalize_whitespace
+from ingestion.quality import chunk_skip_reason
 from runtime import settings
+
+logger = logging.getLogger(__name__)
 
 _HEADING_RE = re.compile(r"^(#{1,4})\s+(.+)$")
 
@@ -18,6 +23,7 @@ class ChunkingStats:
     input_pages: int = 0
     raw_chunks: int = 0
     deduplicated: int = 0
+    quality_skipped: int = 0
     final_chunks: int = 0
 
 
@@ -45,8 +51,31 @@ class SemanticChunker:
         stats.raw_chunks = len(raw_fragments)
         unique = deduplicate_fragments(raw_fragments)
         stats.deduplicated = stats.raw_chunks - len(unique)
-        stats.final_chunks = len(unique)
-        return unique, stats
+        quality_kept: list[KnowledgeFragment] = []
+        for fragment in unique:
+            reason = chunk_skip_reason(
+                fragment.body,
+                section=fragment.section,
+                source_url=fragment.source_url,
+            )
+            if reason:
+                stats.quality_skipped += 1
+                logger.info(
+                    "Skipped chunk | reason=%s section=%s url=%s",
+                    reason,
+                    (fragment.section or "")[:60],
+                    fragment.source_url or "",
+                )
+                continue
+            quality_kept.append(fragment)
+        stats.final_chunks = len(quality_kept)
+        if stats.quality_skipped:
+            logger.info(
+                "Chunk quality filter | kept=%d skipped=%d",
+                stats.final_chunks,
+                stats.quality_skipped,
+            )
+        return quality_kept, stats
 
     def _chunk_page(self, page: CleanedPage) -> list[KnowledgeFragment]:
         sections = self._split_into_sections(page.text)
@@ -54,7 +83,11 @@ class SemanticChunker:
 
         for section_name, section_text in sections:
             for part in self._split_by_size(section_text):
-                if len(part) < self._min_chars:
+                if chunk_skip_reason(
+                    part,
+                    section=section_name,
+                    source_url=page.source_url,
+                ):
                     continue
                 title = page.title
                 full_section = f"{title} › {section_name}" if section_name != "content" else title
