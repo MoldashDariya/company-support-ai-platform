@@ -1,4 +1,4 @@
-"""Core use-case pipeline: guard → retrieve → generate → remember."""
+"""Core use-case pipeline: guard → FAQ or retrieve → generate → remember."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from domain.models import (
     PipelineResult,
     UserInquiry,
 )
+from faq import UNSUPPORTED_FALLBACK, resolve_faq, telegram_intent_key
 from knowledge.context import build_grounded_context, log_retrieval_context_stats
-from knowledge.faq import match_faq
 from domain.ports import KnowledgeRetriever, SessionMemory
 from runtime import settings
 
@@ -42,16 +42,35 @@ class SupportConversationPipeline:
         self._guard = guard
         self._throttle = throttle
 
-    async def _resolve_fragments(
+    def _faq_response(self, inquiry: UserInquiry, faq_match) -> PipelineResult:
+        """Curated FAQ answer — no BM25 retrieval, no LLM."""
+        session_id = inquiry.session_id
+        is_first = self._memory.is_empty(session_id)
+        intent_key = telegram_intent_key(faq_match.intent)
+        response = AssistantResponse(text=faq_match.answer, grounded=True)
+
+        self._memory.append(session_id, ChatTurn(MessageRole.USER, inquiry.text))
+        self._memory.append(session_id, ChatTurn(MessageRole.ASSISTANT, response.text))
+        self._memory.record_assistant_opening(session_id, response.text)
+
+        logger.info(
+            "FAQ answer | intent=%s retrieval=false answer_len=%d",
+            faq_match.intent,
+            len(response.text),
+        )
+        return PipelineResult(
+            reply=response,
+            is_first_contact=is_first,
+            query_intent=intent_key,
+        )
+
+    async def _retrieve_fragments(
         self,
         query: str,
         intent: QueryIntent,
     ) -> list[KnowledgeFragment]:
-        """FAQ first; BM25 retrieval when no confident FAQ match."""
-        faq_hit = match_faq(query, intent)
-        if faq_hit:
-            _category, fragments = faq_hit
-            return fragments
+        """BM25 retrieval — only for general / unknown intents."""
+        logger.info("BM25 retrieval | intent=%s", intent.name)
         return await self._retriever.retrieve(
             query,
             limit=settings.RETRIEVAL_TOP_K,
@@ -87,10 +106,14 @@ class SupportConversationPipeline:
                 block_reason="throttle",
             )
 
+        faq_match = resolve_faq(inquiry.text)
+        if faq_match:
+            return self._faq_response(inquiry, faq_match)
+
         intent = classify_query_intent(inquiry.text)
         last_opening = self._memory.get_last_assistant_opening(session_id)
 
-        fragments = await self._resolve_fragments(inquiry.text, intent)
+        fragments = await self._retrieve_fragments(inquiry.text, intent)
         context = build_grounded_context(
             fragments,
             intent=intent,
@@ -103,8 +126,19 @@ class SupportConversationPipeline:
             intent.retrieval_profile,
             intent.response_style,
         )
-        history = self._memory.get_history(session_id)
 
+        if not context.has_sufficient_evidence:
+            logger.info("Unsupported question | fallback=true retrieval_used=true")
+            fallback = AssistantResponse(text=UNSUPPORTED_FALLBACK, grounded=False)
+            self._memory.append(session_id, ChatTurn(MessageRole.USER, inquiry.text))
+            self._memory.append(session_id, ChatTurn(MessageRole.ASSISTANT, fallback.text))
+            return PipelineResult(
+                reply=fallback,
+                is_first_contact=is_first,
+                query_intent=intent.name,
+            )
+
+        history = self._memory.get_history(session_id)
         response = await self._engine.answer(inquiry.text, context, history)
 
         self._memory.append(session_id, ChatTurn(MessageRole.USER, inquiry.text))
@@ -166,10 +200,16 @@ class SupportConversationPipeline:
             )
             return
 
+        faq_match = resolve_faq(inquiry.text)
+        if faq_match:
+            yield ("token", faq_match.answer)
+            yield ("done", self._faq_response(inquiry, faq_match))
+            return
+
         intent = classify_query_intent(inquiry.text)
         last_opening = self._memory.get_last_assistant_opening(session_id)
 
-        fragments = await self._resolve_fragments(inquiry.text, intent)
+        fragments = await self._retrieve_fragments(inquiry.text, intent)
         context = build_grounded_context(
             fragments,
             intent=intent,
@@ -182,6 +222,20 @@ class SupportConversationPipeline:
             intent.retrieval_profile,
             intent.response_style,
         )
+
+        if not context.has_sufficient_evidence:
+            logger.info("Unsupported question | fallback=true retrieval_used=true")
+            yield ("token", UNSUPPORTED_FALLBACK)
+            yield (
+                "done",
+                PipelineResult(
+                    reply=AssistantResponse(text=UNSUPPORTED_FALLBACK, grounded=False),
+                    is_first_contact=is_first,
+                    query_intent=intent.name,
+                ),
+            )
+            return
+
         history = self._memory.get_history(session_id)
 
         raw = ""

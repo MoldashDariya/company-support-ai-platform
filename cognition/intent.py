@@ -243,6 +243,18 @@ class QueryIntent:
 
 
 def classify_query_intent(query: str) -> QueryIntent:
+    """Classify query; FAQ intents from ``faq`` map to retrieval profiles for BM25 path."""
+    from faq import classify_intent, is_faq_intent, telegram_intent_key
+
+    faq_name = classify_intent(query)
+    if is_faq_intent(faq_name):
+        ui_key = telegram_intent_key(faq_name)
+        return QueryIntent(
+            name=ui_key,
+            retrieval_profile=_RETRIEVAL_PROFILES.get(ui_key, "balanced"),
+            response_style=_RESPONSE_STYLES.get(ui_key, "adaptive"),
+        )
+
     normalized = (query or "").lower().strip()
     for name, patterns in _INTENT_RULES:
         if any(p in normalized for p in patterns):

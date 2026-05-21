@@ -147,6 +147,22 @@ def resolve_cta_buttons(intent: str, query: str = "") -> list[CtaButton]:
             CtaButton("🛒 Каталог", "catalog"),
             CtaButton("📞 Связаться", "about"),
         ],
+        "vacancies": [
+            CtaButton("📞 Связаться", "about"),
+            CtaButton("🌐 Сайт", "site"),
+        ],
+        "office": [
+            CtaButton("📞 Контакты", "about"),
+            CtaButton("🌐 Сайт", "site"),
+        ],
+        "address": [
+            CtaButton("📞 Контакты", "about"),
+            CtaButton("🚚 Доставка", "delivery"),
+        ],
+        "catalog": [
+            CtaButton("🛒 Каталог", "catalog"),
+            CtaButton("📞 Связаться", "about"),
+        ],
     }
 
     if "дерев" in q:
@@ -241,6 +257,10 @@ def conversion_nudge(intent: str, query: str = "") -> str:
         "services": "Можем помочь с доставкой, колеровкой и подбором материалов.",
         "company_overview": "Готовы помочь с подбором — загляните в каталог или напишите нам.",
         "loyalty_program": "Актуальные акции — в разделе промо на сайте.",
+        "vacancies": "Актуальные вакансии и контакты HR — на сайте или по телефону.",
+        "office": "Адреса салонов и график — в разделе «О магазине» на сайте.",
+        "address": "Адреса салонов и условия доставки — на сайте или у менеджера.",
+        "catalog": "Откройте каталог на сайте и выберите нужную категорию.",
     }
     if is_bathroom_paint_query(query):
         return "Для ванной выберите влагостойкие краски — ссылки на подборку ниже."

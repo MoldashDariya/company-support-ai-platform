@@ -25,10 +25,9 @@ GROUNDED_SYSTEM_TEMPLATE = """Ты — консультант поддержки
 {citation_index}
 """
 
-EMPTY_RETRIEVAL_FALLBACK = (
-    f"По этому вопросу в базе нет подготовленного ответа. "
-    f"Свяжитесь с нами: {settings.COMPANY_PHONE} или {settings.COMPANY_SITE}"
-)
+from faq import UNSUPPORTED_FALLBACK
+
+EMPTY_RETRIEVAL_FALLBACK = UNSUPPORTED_FALLBACK
 
 INSUFFICIENT_EVIDENCE_FALLBACK = EMPTY_RETRIEVAL_FALLBACK
 
