@@ -28,8 +28,19 @@ class SessionRepository:
     ) -> None:
         self._store = store or SqliteStore()
         self._window = window or ContextWindowBuilder(self._store)
+        self._last_openings: dict[str, str] = {}
         if migrate_legacy:
             self._migrate_legacy_json()
+
+    def get_last_assistant_opening(self, session_id: str) -> str:
+        return self._last_openings.get(session_id, "")
+
+    def record_assistant_opening(self, session_id: str, answer_text: str) -> None:
+        from cognition.intent import extract_opening
+
+        opening = extract_opening(answer_text)
+        if opening:
+            self._last_openings[session_id] = opening
 
     def is_empty(self, session_id: str) -> bool:
         return self._store.is_session_empty(session_id)

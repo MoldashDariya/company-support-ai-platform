@@ -30,6 +30,7 @@ class IngestionResult:
     corpus_path: str = ""
     chroma_collection: str = ""
     corpus_hash: str = ""
+    top_sections: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
 
@@ -72,6 +73,7 @@ class KnowledgeIngestionPipeline:
         fragments, chunk_stats = self._chunker.chunk_pages(cleaned)
         result.chunks_indexed = chunk_stats.final_chunks
         result.chunks_deduplicated = chunk_stats.deduplicated
+        result.top_sections = _top_sections(fragments)
 
         if not fragments:
             result.errors.append("Chunking produced zero fragments.")
@@ -98,6 +100,13 @@ class KnowledgeIngestionPipeline:
             if doc:
                 cleaned.append(doc)
         return cleaned
+
+
+def _top_sections(fragments: list[KnowledgeFragment], limit: int = 15) -> list[str]:
+    from collections import Counter
+
+    counts = Counter((f.section or "—")[:100] for f in fragments)
+    return [f"{name} ({count})" for name, count in counts.most_common(limit)]
 
 
 def rebuild_semantic_index(fragments: list[KnowledgeFragment]) -> SemanticRetriever:

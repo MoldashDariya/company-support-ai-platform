@@ -8,7 +8,8 @@ from aiogram import F, Router
 from aiogram.types import Message
 
 from channels.telegram.presenter import TelegramPresenter
-from channels.telegram.widgets import support_actions_keyboard
+from channels.telegram.widgets import intent_actions_keyboard
+from cognition.intent import classify_query_intent
 from domain.models import UserInquiry
 from runtime import settings
 
@@ -29,9 +30,10 @@ def create_telegram_router(presenter: TelegramPresenter) -> Router:
 
     @router.message()
     async def on_non_text(message: Message) -> None:
+        intent = classify_query_intent("")
         await message.answer(
             f"Пожалуйста, отправьте текстовый вопрос о «{settings.COMPANY_NAME}».",
-            reply_markup=support_actions_keyboard(),
+            reply_markup=intent_actions_keyboard(intent.name, ""),
         )
 
     return router

@@ -97,9 +97,11 @@ class SemanticChunker:
     def _split_by_size(self, text: str) -> list[str]:
         text = normalize_whitespace(text)
         if len(text) <= self._max_chars:
-            return [text] if text else []
+            return [text] if len(text) >= self._min_chars else []
 
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        if not paragraphs:
+            paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
         chunks: list[str] = []
         buffer = ""
 
@@ -173,7 +175,7 @@ def deduplicate_fragments(fragments: list[KnowledgeFragment]) -> list[KnowledgeF
     unique: list[KnowledgeFragment] = []
 
     for fragment in fragments:
-        key = _content_fingerprint(fragment.body)
+        key = _content_fingerprint(fragment.body, fragment.source_url, fragment.section)
         if key in seen:
             continue
         seen.add(key)
@@ -182,6 +184,7 @@ def deduplicate_fragments(fragments: list[KnowledgeFragment]) -> list[KnowledgeF
     return unique
 
 
-def _content_fingerprint(text: str) -> str:
+def _content_fingerprint(text: str, source_url: str = "", section: str = "") -> str:
     normalized = normalize_whitespace(text).lower()
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    payload = f"{source_url}|{section}|{normalized}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

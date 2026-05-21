@@ -53,6 +53,11 @@ def main() -> int:
     print(f"Chroma collection:  {result.chroma_collection}")
     print(f"Corpus hash:        {result.corpus_hash[:16]}...")
 
+    if result.top_sections:
+        print("\nTop detected sections:")
+        for section in result.top_sections:
+            print(f"  - {section}")
+
     if result.errors:
         print("\nWarnings / errors:")
         for err in result.errors[:20]:

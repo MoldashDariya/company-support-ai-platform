@@ -1,17 +1,12 @@
-"""Telegram UI widgets — contact shortcuts, no command menus."""
+"""Telegram UI widgets — intent-based CTA keyboards."""
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from __future__ import annotations
 
-from runtime import settings
+from aiogram.types import InlineKeyboardMarkup
+
+from channels.telegram.link_router import build_intent_keyboard
 
 
-def support_actions_keyboard() -> InlineKeyboardMarkup:
-    phone = settings.COMPANY_PHONE.replace(" ", "")
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="📞 Позвонить", url=f"tel:{phone}"),
-                InlineKeyboardButton(text="🌐 Сайт", url=settings.COMPANY_SITE),
-            ],
-        ]
-    )
+def intent_actions_keyboard(intent: str, query: str = "") -> InlineKeyboardMarkup | None:
+    """Dynamic conversion CTAs — no static always-on buttons."""
+    return build_intent_keyboard(intent, query)

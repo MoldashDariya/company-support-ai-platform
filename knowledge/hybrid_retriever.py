@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from cognition.intent import QueryIntent, classify_query_intent
 from domain.models import KnowledgeFragment
 from knowledge.loader import load_markdown_corpus
+from knowledge.reranker import merge_candidate_pool, rerank_fragments
 from knowledge.retriever import SparseRetriever
 from knowledge.semantic_retriever import SemanticRetriever
 from runtime import settings
@@ -108,29 +110,45 @@ class HybridRetriever:
         min_score: float = 0.0,
         *,
         language: str | None = None,
+        intent: QueryIntent | None = None,
     ) -> list[KnowledgeFragment]:
         lang = language or settings.CORPUS_LANGUAGE
         mode = settings.RETRIEVAL_MODE
+        effective_limit = min(limit, settings.RETRIEVAL_TOP_K)
+        query_intent = intent or classify_query_intent(query)
 
         if mode == "sparse" and self._sparse:
-            hits = await self._sparse.retrieve(query, limit=limit, min_score=min_score)
-            return self._propagate_citation_refs(hits)
+            hits = await self._sparse.retrieve(
+                query,
+                limit=settings.RETRIEVAL_CANDIDATE_POOL,
+                min_score=min_score,
+            )
+            ranked = rerank_fragments(query, hits, limit=effective_limit, intent=query_intent)
+            return self._propagate_citation_refs(ranked)
 
         if mode == "semantic" and self._semantic:
             hits = await self._semantic.retrieve(
                 query,
-                limit=limit,
+                limit=settings.RETRIEVAL_CANDIDATE_POOL,
                 min_score=settings.SEMANTIC_MIN_SCORE,
                 language=lang,
             )
-            return self._propagate_citation_refs(hits)
+            ranked = rerank_fragments(query, hits, limit=effective_limit, intent=query_intent)
+            return self._propagate_citation_refs(ranked)
 
         if self._semantic:
-            return await self._hybrid_retrieve(query, limit, min_score, language=lang)
+            return await self._hybrid_retrieve(
+                query, effective_limit, min_score, language=lang, intent=query_intent
+            )
 
         if self._sparse:
-            hits = await self._sparse.retrieve(query, limit=limit, min_score=min_score)
-            return self._propagate_citation_refs(hits)
+            hits = await self._sparse.retrieve(
+                query,
+                limit=settings.RETRIEVAL_CANDIDATE_POOL,
+                min_score=min_score,
+            )
+            ranked = rerank_fragments(query, hits, limit=effective_limit, intent=query_intent)
+            return self._propagate_citation_refs(ranked)
         return []
 
     @staticmethod
@@ -149,12 +167,14 @@ class HybridRetriever:
         min_score: float,
         *,
         language: str | None,
+        intent: QueryIntent,
     ) -> list[KnowledgeFragment]:
+        pool_size = settings.RETRIEVAL_CANDIDATE_POOL
         rankings: list[list[KnowledgeFragment]] = []
 
         semantic_hits = await self._semantic.retrieve(
             query,
-            limit=limit * 2,
+            limit=pool_size,
             min_score=settings.SEMANTIC_MIN_SCORE,
             language=language,
         )
@@ -164,7 +184,7 @@ class HybridRetriever:
         if self._enable_sparse and self._sparse:
             sparse_hits = await self._sparse.retrieve(
                 query,
-                limit=limit * 2,
+                limit=pool_size,
                 min_score=min_score,
             )
             if sparse_hits:
@@ -176,12 +196,21 @@ class HybridRetriever:
             return []
 
         if len(rankings) == 1:
-            fused = rankings[0][:limit]
+            candidates = rankings[0]
         else:
-            fused = _reciprocal_rank_fusion(rankings, k=self._rrf_k, limit=limit)
+            rrf_ranked = _reciprocal_rank_fusion(
+                rankings,
+                k=self._rrf_k,
+                limit=pool_size,
+            )
+            candidates = merge_candidate_pool(*rankings, rrf_ranked)
 
-        fused = [f.with_score(f.score, "hybrid") for f in fused]
-        return self._propagate_citation_refs(fused)
+        all_known = self._fragments or candidates
+        ranked = rerank_fragments(query, candidates, limit=limit, intent=intent)
+        if not ranked and all_known:
+            ranked = rerank_fragments(query, all_known, limit=limit, intent=intent)
+
+        return self._propagate_citation_refs(ranked)
 
 
 def _fragment_key(fragment: KnowledgeFragment) -> str:

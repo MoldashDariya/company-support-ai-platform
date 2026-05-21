@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 
 from cognition.composer import GroundedResponseComposer
 from cognition.provider import CerebrasLanguageModel
 from domain.models import AssistantResponse, ChatTurn, GroundedContext
+
+logger = logging.getLogger(__name__)
 
 
 class GroundedAnswerEngine:
@@ -38,14 +41,33 @@ class GroundedAnswerEngine:
         history: list[ChatTurn],
     ) -> AsyncIterator[str]:
         if not context.has_sufficient_evidence:
-            from cognition.prompts import INSUFFICIENT_EVIDENCE_FALLBACK
+            from cognition.prompts import EMPTY_RETRIEVAL_FALLBACK
 
-            yield INSUFFICIENT_EVIDENCE_FALLBACK
+            logger.info(
+                "Answer generated | len=%d fallback_used=true retrieved_context_used=false",
+                len(EMPTY_RETRIEVAL_FALLBACK),
+            )
+            yield EMPTY_RETRIEVAL_FALLBACK
             return
 
         system = self._composer.build_system_prompt(context)
-        async for token in self._llm.generate_stream(system, history, user_text):
-            yield token
+        try:
+            async for token in self._llm.generate_stream(system, history, user_text):
+                yield token
+        except Exception:
+            logger.exception(
+                "LLM stream failed | system_chars=%d history_turns=%d",
+                len(system),
+                len(history),
+            )
+            from cognition.postprocessor import synthesize_from_context
+
+            recovered = synthesize_from_context(context)
+            logger.warning(
+                "LLM stream failed; using context synthesis | len=%d",
+                len(recovered),
+            )
+            yield recovered
 
     def finalize_stream(
         self,

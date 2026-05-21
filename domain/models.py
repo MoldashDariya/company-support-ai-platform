@@ -121,6 +121,10 @@ class GroundedContext:
     formatted: str = ""
     citations: list[SourceCitation] = field(default_factory=list)
     has_sufficient_evidence: bool = True
+    query_intent: str = "general"
+    retrieval_profile: str = "balanced"
+    response_style: str = "adaptive"
+    last_assistant_opening: str = ""
 
 
 @dataclass
@@ -141,3 +145,4 @@ class PipelineResult:
     is_first_contact: bool = False
     blocked: bool = False
     block_reason: str | None = None
+    query_intent: str = "general"

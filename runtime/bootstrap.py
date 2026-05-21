@@ -20,6 +20,43 @@ from safety.throttle import SlidingWindowThrottle
 
 logger = logging.getLogger(__name__)
 
+_INSTALL_HINT = (
+    "Install dependencies:\n"
+    "  python3 -m venv .venv && source .venv/bin/activate\n"
+    "  pip install -r requirements.txt"
+)
+
+
+def _llm_provider_name() -> str:
+    base = settings.LLM_BASE_URL.lower()
+    if "cerebras" in base:
+        return "Cerebras"
+    if "openai" in base:
+        return "OpenAI"
+    return "OpenAI-compatible LLM"
+
+
+def validate_environment() -> None:
+    """Validate required .env variables before starting heavy services."""
+    missing: list[str] = []
+    hints: list[str] = []
+
+    if not settings.TELEGRAM_BOT_TOKEN:
+        missing.append("TELEGRAM_BOT_TOKEN")
+        hints.append("  TELEGRAM_BOT_TOKEN — Telegram bot token from @BotFather")
+    if not settings.LLM_API_KEY:
+        missing.append("OPENAI_API_KEY or LLM_API_KEY")
+        hints.append("  OPENAI_API_KEY — OpenAI API key (or LLM_API_KEY for other providers)")
+
+    if missing:
+        detail = "\n".join(hints)
+        raise SystemExit(
+            "Startup failed: missing required environment variables in .env:\n"
+            f"  {', '.join(missing)}\n\n"
+            f"Add the following to your .env file:\n{detail}\n\n"
+            "See .env.example for a full template."
+        )
+
 
 class ApplicationContext:
     """Holds composed services for the support assistant runtime."""
@@ -43,18 +80,22 @@ class ApplicationContext:
             throttle=self.throttle,
         )
         self.presenter = TelegramPresenter(self.pipeline)
+        self._llm = llm
 
-    def validate_environment(self) -> None:
-        missing = []
-        if not settings.TELEGRAM_BOT_TOKEN:
-            missing.append("TELEGRAM_BOT_TOKEN")
-        if not settings.LLM_API_KEY:
-            missing.append("OPENAI_API_KEY (or LLM_API_KEY)")
-        if missing:
-            raise SystemExit(
-                f"Missing required environment variables: {', '.join(missing)}. "
-                "See .env.example"
-            )
+    def log_provider_ready(self) -> None:
+        provider = _llm_provider_name()
+        logger.info(
+            "%s provider initialized (model=%s)",
+            provider,
+            settings.LLM_MODEL,
+        )
+
+    async def initialize_telegram(self) -> Bot:
+        bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+        me = await bot.get_me()
+        username = me.username or "(no username)"
+        logger.info("Telegram bot initialized (@%s)", username)
+        return bot
 
     def build_dispatcher(self) -> Dispatcher:
         dp = Dispatcher()
@@ -63,3 +104,7 @@ class ApplicationContext:
 
     def build_bot(self) -> Bot:
         return Bot(token=settings.TELEGRAM_BOT_TOKEN)
+
+
+def dependency_install_hint() -> str:
+    return _INSTALL_HINT

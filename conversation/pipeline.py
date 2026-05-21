@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from cognition.engine import GroundedAnswerEngine
+from cognition.intent import QueryIntent, classify_query_intent
 from domain.models import (
     AssistantResponse,
     ChatTurn,
@@ -12,7 +13,7 @@ from domain.models import (
     PipelineResult,
     UserInquiry,
 )
-from knowledge.context import build_grounded_context
+from knowledge.context import build_grounded_context, log_retrieval_context_stats
 from domain.ports import KnowledgeRetriever, SessionMemory
 from runtime import settings
 
@@ -67,12 +68,27 @@ class SupportConversationPipeline:
                 block_reason="throttle",
             )
 
+        intent = classify_query_intent(inquiry.text)
+        last_opening = self._memory.get_last_assistant_opening(session_id)
+
         fragments = await self._retriever.retrieve(
             inquiry.text,
             limit=settings.RETRIEVAL_TOP_K,
             min_score=settings.RETRIEVAL_MIN_SCORE,
+            intent=intent,
         )
-        context = build_grounded_context(fragments)
+        context = build_grounded_context(
+            fragments,
+            intent=intent,
+            last_assistant_opening=last_opening,
+        )
+        log_retrieval_context_stats(inquiry.text, fragments, context)
+        logger.info(
+            "Query routing | intent=%s retrieval_profile=%s response_style=%s",
+            intent.name,
+            intent.retrieval_profile,
+            intent.response_style,
+        )
         history = self._memory.get_history(session_id)
 
         response = await self._engine.answer(inquiry.text, context, history)
@@ -82,6 +98,7 @@ class SupportConversationPipeline:
             session_id,
             ChatTurn(MessageRole.ASSISTANT, response.text),
         )
+        self._memory.record_assistant_opening(session_id, response.text)
 
         logger.info(
             "session=%s query_len=%d answer_len=%d citations=%d grounded=%s",
@@ -92,7 +109,11 @@ class SupportConversationPipeline:
             response.grounded,
         )
 
-        return PipelineResult(reply=response, is_first_contact=is_first)
+        return PipelineResult(
+            reply=response,
+            is_first_contact=is_first,
+            query_intent=intent.name,
+        )
 
     async def handle_stream(self, inquiry: UserInquiry):
         """Async generator for streaming channel presenters."""
@@ -131,12 +152,27 @@ class SupportConversationPipeline:
             )
             return
 
+        intent = classify_query_intent(inquiry.text)
+        last_opening = self._memory.get_last_assistant_opening(session_id)
+
         fragments = await self._retriever.retrieve(
             inquiry.text,
             limit=settings.RETRIEVAL_TOP_K,
             min_score=settings.RETRIEVAL_MIN_SCORE,
+            intent=intent,
         )
-        context = build_grounded_context(fragments)
+        context = build_grounded_context(
+            fragments,
+            intent=intent,
+            last_assistant_opening=last_opening,
+        )
+        log_retrieval_context_stats(inquiry.text, fragments, context)
+        logger.info(
+            "Query routing | intent=%s retrieval_profile=%s response_style=%s",
+            intent.name,
+            intent.retrieval_profile,
+            intent.response_style,
+        )
         history = self._memory.get_history(session_id)
 
         raw = ""
@@ -150,8 +186,13 @@ class SupportConversationPipeline:
             session_id,
             ChatTurn(MessageRole.ASSISTANT, response.text),
         )
+        self._memory.record_assistant_opening(session_id, response.text)
 
         yield (
             "done",
-            PipelineResult(reply=response, is_first_contact=is_first),
+            PipelineResult(
+                reply=response,
+                is_first_contact=is_first,
+                query_intent=intent.name,
+            ),
         )

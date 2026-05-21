@@ -42,12 +42,18 @@ COMPANY_PHONE = os.getenv("COMPANY_PHONE", "+77780615000")
 COMPANY_SITE = os.getenv("COMPANY_SITE", "https://centr-krasok.kz/")
 
 # Retrieval (RAG)
-RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", os.getenv("TOP_K_CHUNKS", "4")))
-RETRIEVAL_MIN_SCORE = float(os.getenv("RETRIEVAL_MIN_SCORE", "0.1"))
+RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", os.getenv("TOP_K_CHUNKS", "5")))
+MAX_GROUNDED_CONTEXT_CHARS = int(os.getenv("MAX_GROUNDED_CONTEXT_CHARS", "7000"))
+MAX_FRAGMENT_BODY_CHARS = int(os.getenv("MAX_FRAGMENT_BODY_CHARS", "450"))
+ANSWER_MIN_WORDS = int(os.getenv("ANSWER_MIN_WORDS", "40"))
+ANSWER_MAX_WORDS = int(os.getenv("ANSWER_MAX_WORDS", "180"))
+RETRIEVAL_MIN_SCORE = float(os.getenv("RETRIEVAL_MIN_SCORE", "0.0"))
 RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "hybrid")  # hybrid | semantic | sparse
 ENABLE_BM25 = os.getenv("ENABLE_BM25", "true").lower() in ("1", "true", "yes")
 HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))
-SEMANTIC_MIN_SCORE = float(os.getenv("SEMANTIC_MIN_SCORE", "0.35"))
+SEMANTIC_MIN_SCORE = float(os.getenv("SEMANTIC_MIN_SCORE", "0.20"))
+RETRIEVAL_WEAK_THRESHOLD = float(os.getenv("RETRIEVAL_WEAK_THRESHOLD", "0.12"))
+RETRIEVAL_CANDIDATE_POOL = int(os.getenv("RETRIEVAL_CANDIDATE_POOL", "15"))
 CITATION_INCLUDE_URLS = os.getenv("CITATION_INCLUDE_URLS", "true").lower() in (
     "1",
     "true",
@@ -64,16 +70,18 @@ CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "company_knowledge")
 CORPUS_LANGUAGE = os.getenv("CORPUS_LANGUAGE", "ru")
 
 # Website ingestion
-CRAWL_MAX_PAGES = int(os.getenv("CRAWL_MAX_PAGES", "30"))
+CRAWL_MAX_PAGES = int(os.getenv("CRAWL_MAX_PAGES", "80"))
+CRAWL_MAX_HTML_BYTES = int(os.getenv("CRAWL_MAX_HTML_BYTES", "150000"))
+CLEAN_MAX_PAGE_CHARS = int(os.getenv("CLEAN_MAX_PAGE_CHARS", "6000"))
 CRAWL_REQUEST_DELAY_SEC = float(os.getenv("CRAWL_REQUEST_DELAY_SEC", "0.5"))
 CRAWL_TIMEOUT_SEC = float(os.getenv("CRAWL_TIMEOUT_SEC", "20"))
 CRAWL_USER_AGENT = os.getenv(
     "CRAWL_USER_AGENT",
     "CompanySupportBot/1.0 (+https://github.com; knowledge-ingestion)",
 )
-CHUNK_MAX_CHARS = int(os.getenv("CHUNK_MAX_CHARS", "900"))
+CHUNK_MAX_CHARS = int(os.getenv("CHUNK_MAX_CHARS", "500"))
 CHUNK_MIN_CHARS = int(os.getenv("CHUNK_MIN_CHARS", "120"))
-CHUNK_OVERLAP_CHARS = int(os.getenv("CHUNK_OVERLAP_CHARS", "80"))
+CHUNK_OVERLAP_CHARS = min(int(os.getenv("CHUNK_OVERLAP_CHARS", "80")), 80)
 
 
 def ingestion_seed_urls() -> list[str]:
@@ -82,8 +90,14 @@ def ingestion_seed_urls() -> list[str]:
     if raw:
         return [u.strip() for u in raw.split(",") if u.strip()]
     base = COMPANY_SITE.rstrip("/")
-    # Single seed — crawler discovers same-domain editorial pages via link graph
-    return [base + "/"]
+    return [
+        base + "/",
+        base + "/about",
+        base + "/about/howto",
+        base + "/about/delivery",
+        base + "/articles",
+        base + "/promotions",
+    ]
 
 # Conversation memory
 MAX_SESSION_TURNS = int(os.getenv("MAX_SESSION_TURNS", os.getenv("MAX_HISTORY_TURNS", "8")))
