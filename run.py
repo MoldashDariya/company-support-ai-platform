@@ -5,7 +5,11 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
+import os
 import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent
 
 _BASE_PACKAGES = (
     ("aiogram", "aiogram"),
@@ -20,11 +24,24 @@ _SEMANTIC_PACKAGES = (
 )
 
 
-def _check_dependencies() -> None:
-    from runtime import settings
+def _load_dotenv() -> None:
+    """Load project .env without overriding variables already set (e.g. on Render)."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(_ROOT / ".env", override=False)
 
+
+def _semantic_search_enabled() -> bool:
+    """Whether chromadb / sentence-transformers are required (matches runtime.settings)."""
+    _load_dotenv()
+    return os.getenv("ENABLE_SEMANTIC_SEARCH", "false").lower() in ("1", "true", "yes")
+
+
+def _check_dependencies() -> None:
     required = list(_BASE_PACKAGES)
-    if settings.ENABLE_SEMANTIC_SEARCH:
+    if _semantic_search_enabled():
         required.extend(_SEMANTIC_PACKAGES)
 
     missing: list[str] = []
@@ -34,12 +51,16 @@ def _check_dependencies() -> None:
         except ImportError:
             missing.append(package)
     if missing:
+        install_lines = ["  pip install -r requirements.txt"]
+        if _semantic_search_enabled():
+            install_lines.append(
+                "  pip install chromadb sentence-transformers  # ENABLE_SEMANTIC_SEARCH=true"
+            )
         print(
             "Missing Python dependencies:\n"
             f"  {', '.join(missing)}\n\n"
             "Install dependencies:\n"
-            "  python3 -m venv .venv && source .venv/bin/activate\n"
-            "  pip install -r requirements.txt",
+            + "\n".join(install_lines),
             file=sys.stderr,
         )
         raise SystemExit(1)

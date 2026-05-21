@@ -7,9 +7,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 ROOT_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT_DIR / ".env", override=False)
+
+
+def _env_bool(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).lower() in ("1", "true", "yes")
 CORPUS_PATH = ROOT_DIR / "data" / "company_knowledge.md"
 MEMORY_DB_PATH = ROOT_DIR / "data" / "memory.db"
 # Legacy JSON paths (auto-migrated on first startup)
@@ -49,11 +52,8 @@ ANSWER_MIN_WORDS = int(os.getenv("ANSWER_MIN_WORDS", "40"))
 ANSWER_MAX_WORDS = int(os.getenv("ANSWER_MAX_WORDS", "180"))
 RETRIEVAL_MIN_SCORE = float(os.getenv("RETRIEVAL_MIN_SCORE", "0.0"))
 RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "hybrid")  # hybrid | semantic | sparse
-ENABLE_SEMANTIC_SEARCH = os.getenv("ENABLE_SEMANTIC_SEARCH", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-)
+# Default false — safe for Render/BM25-only; set true in .env for local hybrid RAG
+ENABLE_SEMANTIC_SEARCH = _env_bool("ENABLE_SEMANTIC_SEARCH", "false")
 ENABLE_BM25 = os.getenv("ENABLE_BM25", "true").lower() in ("1", "true", "yes")
 HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))
 SEMANTIC_MIN_SCORE = float(os.getenv("SEMANTIC_MIN_SCORE", "0.20"))

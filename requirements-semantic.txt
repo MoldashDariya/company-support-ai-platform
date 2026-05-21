@@ -1,0 +1,3 @@
+# Optional — only when ENABLE_SEMANTIC_SEARCH=true (local hybrid RAG)
+chromadb>=0.5,<1
+sentence-transformers>=3.0,<4
