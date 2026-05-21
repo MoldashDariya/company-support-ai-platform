@@ -16,6 +16,8 @@ _BASE_PACKAGES = (
     ("openai", "openai"),
     ("dotenv", "python-dotenv"),
     ("rank_bm25", "rank-bm25"),
+    ("fastapi", "fastapi"),
+    ("uvicorn", "uvicorn"),
 )
 
 _SEMANTIC_PACKAGES = (
@@ -87,6 +89,24 @@ def _load_runtime():
 logger = logging.getLogger(__name__)
 
 
+async def _run_health_server() -> None:
+    import uvicorn
+
+    from runtime.health import app as health_app
+
+    port = int(os.getenv("PORT", "10000"))
+    config = uvicorn.Config(
+        health_app,
+        host="0.0.0.0",
+        port=port,
+        log_level="warning",
+        access_log=False,
+    )
+    server = uvicorn.Server(config)
+    logger.info("Health server listening on http://0.0.0.0:%s", port)
+    await server.serve()
+
+
 async def main() -> None:
     ApplicationContext, validate_environment, configure_logging, settings = _load_runtime()
 
@@ -114,7 +134,10 @@ async def main() -> None:
         settings.ENABLE_STREAMING,
     )
 
-    await dispatcher.start_polling(bot)
+    await asyncio.gather(
+        _run_health_server(),
+        dispatcher.start_polling(bot),
+    )
 
 
 if __name__ == "__main__":
